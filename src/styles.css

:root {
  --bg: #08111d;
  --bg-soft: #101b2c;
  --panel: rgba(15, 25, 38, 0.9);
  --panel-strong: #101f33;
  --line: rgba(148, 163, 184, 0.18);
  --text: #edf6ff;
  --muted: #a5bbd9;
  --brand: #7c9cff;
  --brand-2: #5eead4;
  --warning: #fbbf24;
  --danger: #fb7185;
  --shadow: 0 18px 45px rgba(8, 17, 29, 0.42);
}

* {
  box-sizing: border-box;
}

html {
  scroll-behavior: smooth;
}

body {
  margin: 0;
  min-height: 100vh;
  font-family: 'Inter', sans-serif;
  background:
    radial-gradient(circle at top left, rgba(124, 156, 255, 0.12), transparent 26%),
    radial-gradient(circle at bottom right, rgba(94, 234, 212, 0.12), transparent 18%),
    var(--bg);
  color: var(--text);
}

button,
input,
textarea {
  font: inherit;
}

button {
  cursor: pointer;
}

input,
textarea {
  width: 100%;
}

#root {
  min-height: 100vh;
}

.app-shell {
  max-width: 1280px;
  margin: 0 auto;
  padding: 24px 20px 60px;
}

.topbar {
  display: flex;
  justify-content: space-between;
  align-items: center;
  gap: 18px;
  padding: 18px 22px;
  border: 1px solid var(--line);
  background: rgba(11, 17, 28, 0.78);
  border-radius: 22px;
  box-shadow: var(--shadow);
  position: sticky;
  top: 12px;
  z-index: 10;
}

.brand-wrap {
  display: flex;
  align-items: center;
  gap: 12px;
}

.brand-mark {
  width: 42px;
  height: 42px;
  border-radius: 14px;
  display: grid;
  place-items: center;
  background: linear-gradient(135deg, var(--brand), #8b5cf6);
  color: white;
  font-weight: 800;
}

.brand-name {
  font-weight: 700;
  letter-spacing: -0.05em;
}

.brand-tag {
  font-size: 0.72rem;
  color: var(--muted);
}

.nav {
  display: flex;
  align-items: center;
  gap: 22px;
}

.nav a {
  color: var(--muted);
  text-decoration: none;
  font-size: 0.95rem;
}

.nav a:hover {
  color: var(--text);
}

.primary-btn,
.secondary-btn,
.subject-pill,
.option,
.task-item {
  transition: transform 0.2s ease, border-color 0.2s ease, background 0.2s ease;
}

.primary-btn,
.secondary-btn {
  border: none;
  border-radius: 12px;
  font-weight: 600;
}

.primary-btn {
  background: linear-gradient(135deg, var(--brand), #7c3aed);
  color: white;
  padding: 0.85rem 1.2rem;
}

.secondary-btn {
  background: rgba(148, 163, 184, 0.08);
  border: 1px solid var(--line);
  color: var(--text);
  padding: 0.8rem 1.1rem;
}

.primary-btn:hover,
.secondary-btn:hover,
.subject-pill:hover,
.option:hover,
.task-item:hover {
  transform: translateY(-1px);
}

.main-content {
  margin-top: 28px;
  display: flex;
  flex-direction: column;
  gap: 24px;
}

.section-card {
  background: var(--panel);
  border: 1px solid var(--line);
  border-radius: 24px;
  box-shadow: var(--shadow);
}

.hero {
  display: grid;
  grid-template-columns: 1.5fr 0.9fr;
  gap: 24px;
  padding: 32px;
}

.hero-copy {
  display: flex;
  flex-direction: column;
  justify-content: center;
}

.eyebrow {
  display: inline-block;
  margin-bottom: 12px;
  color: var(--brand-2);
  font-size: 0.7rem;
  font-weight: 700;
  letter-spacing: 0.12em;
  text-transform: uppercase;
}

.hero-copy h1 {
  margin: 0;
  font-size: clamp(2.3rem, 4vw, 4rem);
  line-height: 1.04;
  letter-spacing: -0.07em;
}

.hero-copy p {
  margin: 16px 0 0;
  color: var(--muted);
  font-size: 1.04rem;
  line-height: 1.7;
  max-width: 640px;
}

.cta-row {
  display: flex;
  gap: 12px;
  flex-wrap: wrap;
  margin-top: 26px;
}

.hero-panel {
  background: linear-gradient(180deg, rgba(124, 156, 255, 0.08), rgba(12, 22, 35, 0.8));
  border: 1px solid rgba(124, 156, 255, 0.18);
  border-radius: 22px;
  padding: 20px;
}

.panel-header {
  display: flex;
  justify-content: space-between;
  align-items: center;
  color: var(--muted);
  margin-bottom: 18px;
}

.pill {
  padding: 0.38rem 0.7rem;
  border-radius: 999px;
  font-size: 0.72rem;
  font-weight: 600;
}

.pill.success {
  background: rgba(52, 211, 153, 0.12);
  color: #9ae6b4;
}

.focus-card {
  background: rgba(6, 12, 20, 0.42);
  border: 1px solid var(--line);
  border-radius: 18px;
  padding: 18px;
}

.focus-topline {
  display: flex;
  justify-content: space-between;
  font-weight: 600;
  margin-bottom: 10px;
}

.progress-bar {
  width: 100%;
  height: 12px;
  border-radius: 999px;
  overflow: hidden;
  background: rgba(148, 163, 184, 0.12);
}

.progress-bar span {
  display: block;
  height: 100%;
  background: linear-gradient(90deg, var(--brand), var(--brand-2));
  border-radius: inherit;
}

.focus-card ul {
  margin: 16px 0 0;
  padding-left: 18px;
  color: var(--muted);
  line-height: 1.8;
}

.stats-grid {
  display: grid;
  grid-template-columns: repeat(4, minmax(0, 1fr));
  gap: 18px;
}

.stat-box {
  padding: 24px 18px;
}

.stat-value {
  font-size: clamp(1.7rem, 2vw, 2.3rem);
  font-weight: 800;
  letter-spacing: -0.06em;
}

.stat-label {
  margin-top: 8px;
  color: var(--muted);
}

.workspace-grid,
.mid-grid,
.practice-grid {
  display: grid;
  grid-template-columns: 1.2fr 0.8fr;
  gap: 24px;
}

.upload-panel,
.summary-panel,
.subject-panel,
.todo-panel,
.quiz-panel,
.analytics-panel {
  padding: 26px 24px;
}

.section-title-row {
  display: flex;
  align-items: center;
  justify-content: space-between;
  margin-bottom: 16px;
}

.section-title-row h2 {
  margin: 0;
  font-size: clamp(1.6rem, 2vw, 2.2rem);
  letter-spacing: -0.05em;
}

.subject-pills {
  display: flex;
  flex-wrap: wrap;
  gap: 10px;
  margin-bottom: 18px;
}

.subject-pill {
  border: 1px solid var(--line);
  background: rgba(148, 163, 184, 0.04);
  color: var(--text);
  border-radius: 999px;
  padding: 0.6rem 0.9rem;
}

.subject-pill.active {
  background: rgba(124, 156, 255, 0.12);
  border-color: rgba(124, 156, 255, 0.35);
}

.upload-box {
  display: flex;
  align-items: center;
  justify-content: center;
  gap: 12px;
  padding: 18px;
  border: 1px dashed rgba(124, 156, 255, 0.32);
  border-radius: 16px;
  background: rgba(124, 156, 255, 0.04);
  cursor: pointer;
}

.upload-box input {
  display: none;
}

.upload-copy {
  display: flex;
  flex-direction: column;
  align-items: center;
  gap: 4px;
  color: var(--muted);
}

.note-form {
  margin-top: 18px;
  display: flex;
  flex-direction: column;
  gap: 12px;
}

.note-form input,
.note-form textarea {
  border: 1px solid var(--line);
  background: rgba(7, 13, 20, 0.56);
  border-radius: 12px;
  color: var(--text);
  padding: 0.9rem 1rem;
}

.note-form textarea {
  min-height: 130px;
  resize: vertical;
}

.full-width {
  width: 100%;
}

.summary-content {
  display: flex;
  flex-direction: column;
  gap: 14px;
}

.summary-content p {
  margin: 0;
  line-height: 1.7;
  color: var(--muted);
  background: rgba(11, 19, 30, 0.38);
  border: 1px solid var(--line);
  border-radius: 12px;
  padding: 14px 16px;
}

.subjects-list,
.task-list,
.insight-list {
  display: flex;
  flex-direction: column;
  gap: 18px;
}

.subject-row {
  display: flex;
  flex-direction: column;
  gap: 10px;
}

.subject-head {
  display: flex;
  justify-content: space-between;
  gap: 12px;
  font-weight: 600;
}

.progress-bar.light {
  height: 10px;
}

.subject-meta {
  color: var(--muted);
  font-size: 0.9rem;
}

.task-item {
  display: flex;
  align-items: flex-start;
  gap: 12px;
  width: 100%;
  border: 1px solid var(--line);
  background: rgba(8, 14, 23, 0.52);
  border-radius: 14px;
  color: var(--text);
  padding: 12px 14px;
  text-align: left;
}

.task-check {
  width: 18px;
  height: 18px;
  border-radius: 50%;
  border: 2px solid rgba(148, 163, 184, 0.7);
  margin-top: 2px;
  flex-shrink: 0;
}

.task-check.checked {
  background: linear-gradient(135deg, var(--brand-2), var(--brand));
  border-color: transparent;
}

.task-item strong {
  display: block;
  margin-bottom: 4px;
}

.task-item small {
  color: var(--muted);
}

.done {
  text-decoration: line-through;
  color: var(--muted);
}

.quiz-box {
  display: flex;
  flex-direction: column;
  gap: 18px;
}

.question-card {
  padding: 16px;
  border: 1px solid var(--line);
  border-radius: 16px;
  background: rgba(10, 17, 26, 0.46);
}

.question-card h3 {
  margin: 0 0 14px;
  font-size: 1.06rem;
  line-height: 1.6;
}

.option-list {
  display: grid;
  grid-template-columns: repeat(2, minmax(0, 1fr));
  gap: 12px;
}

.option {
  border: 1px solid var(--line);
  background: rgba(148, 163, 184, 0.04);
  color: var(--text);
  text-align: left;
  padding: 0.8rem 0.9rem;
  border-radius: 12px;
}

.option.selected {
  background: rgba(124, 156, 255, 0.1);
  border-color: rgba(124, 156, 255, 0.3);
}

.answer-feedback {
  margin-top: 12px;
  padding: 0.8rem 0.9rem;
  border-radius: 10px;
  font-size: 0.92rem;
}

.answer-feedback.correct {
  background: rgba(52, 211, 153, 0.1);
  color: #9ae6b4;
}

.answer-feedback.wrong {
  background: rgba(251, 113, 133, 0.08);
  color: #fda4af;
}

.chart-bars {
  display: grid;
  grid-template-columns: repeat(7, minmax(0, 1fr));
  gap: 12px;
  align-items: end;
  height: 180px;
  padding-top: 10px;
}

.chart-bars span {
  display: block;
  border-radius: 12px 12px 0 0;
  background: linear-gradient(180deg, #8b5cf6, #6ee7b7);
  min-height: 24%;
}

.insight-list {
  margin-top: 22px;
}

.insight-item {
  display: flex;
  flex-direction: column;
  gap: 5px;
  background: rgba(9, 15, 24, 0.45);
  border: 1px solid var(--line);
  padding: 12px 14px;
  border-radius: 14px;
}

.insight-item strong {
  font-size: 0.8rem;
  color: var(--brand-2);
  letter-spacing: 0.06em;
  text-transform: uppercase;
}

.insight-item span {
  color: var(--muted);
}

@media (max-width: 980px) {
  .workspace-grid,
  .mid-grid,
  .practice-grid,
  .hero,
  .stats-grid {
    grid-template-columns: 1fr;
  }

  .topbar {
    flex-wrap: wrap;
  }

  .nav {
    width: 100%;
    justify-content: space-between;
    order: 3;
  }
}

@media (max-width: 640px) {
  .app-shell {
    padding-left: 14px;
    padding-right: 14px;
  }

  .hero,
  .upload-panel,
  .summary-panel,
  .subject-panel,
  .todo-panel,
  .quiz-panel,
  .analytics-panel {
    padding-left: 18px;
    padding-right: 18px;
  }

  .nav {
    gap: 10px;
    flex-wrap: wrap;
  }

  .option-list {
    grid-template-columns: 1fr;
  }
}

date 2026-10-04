@@ -1,0 +1,460 @@
+import { useEffect, useMemo, useState } from 'react';
+
+type Subject = {
+  id: string;
+  name: string;
+  color: string;
+  progress: number;
+  nextTopic: string;
+};
+
+type StudyNote = {
+  id: string;
+  title: string;
+  subject: string;
+  content: string;
+  createdAt: string;
+};
+
+type Question = {
+  id: number;
+  prompt: string;
+  options: string[];
+  answer: string;
+};
+
+type Task = {
+  id: number;
+  title: string;
+  done: boolean;
+  due: string;
+};
+
+const STORAGE_KEY = 'studymate-ai-state-v1';
+
+const subjectCatalog: Subject[] = [
+  { id: 'DBMS', name: 'DBMS', color: '#7c9cff', progress: 78, nextTopic: 'Normalization review' },
+  { id: 'Operating Systems', name: 'Operating Systems', color: '#34d399', progress: 64, nextTopic: 'Process scheduling' },
+  { id: 'Data Structures', name: 'Data Structures', color: '#f59e0b', progress: 82, nextTopic: 'Trees and traversal' },
+  { id: 'Machine Learning', name: 'Machine Learning', color: '#a78bfa', progress: 58, nextTopic: 'Regression recap' }
+];
+
+const starterNotes: StudyNote[] = [
+  {
+    id: 'note-1',
+    title: 'DBMS revision summary',
+    subject: 'DBMS',
+    createdAt: '2026-10-02',
+    content:
+      'Database management systems store data in tables and manage relationships through primary and foreign keys. Normalization reduces redundancy and improves consistency in relational databases. Transactions follow ACID properties: atomicity, consistency, isolation, and durability. Indexing speeds up query retrieval while joins connect data from multiple tables.'
+  },
+  {
+    id: 'note-2',
+    title: 'Operating systems practice notes',
+    subject: 'Operating Systems',
+    createdAt: '2026-10-01',
+    content:
+      'Operating systems coordinate hardware and software resources. CPU scheduling algorithms decide which process runs next. Memory management includes paging and segmentation, while deadlocks occur when processes wait on each other forever. Virtual memory allows the system to use disk space to extend RAM capacity.'
+  }
+];
+
+const starterTasks: Task[] = [
+  { id: 1, title: 'Revise normalization rules', done: false, due: 'Today' },
+  { id: 2, title: 'Solve 10 DBMS MCQs', done: true, due: 'Today' },
+  { id: 3, title: 'Watch OS scheduling recap', done: false, due: 'Tomorrow' }
+];
+
+function generateSummary(text: string): string[] {
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const summary = sentences.slice(0, 4).map((sentence) => sentence.trim());
+  return summary.length > 0 ? summary : ['No summary available yet. Add notes to generate insights.'];
+}
+
+function getKeywords(text: string): string[] {
+  return Array.from(
+    new Set(
+      text
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((word) => word.length > 4)
+    )
+  ).slice(0, 6);
+}
+
+function createQuiz(text: string, subject: string): Question[] {
+  const keywords = getKeywords(text);
+  const fallback = ['Data', 'Memory', 'Process', 'Index'];
+  const keyA = keywords[0] || fallback[0];
+  const keyB = keywords[1] || fallback[1];
+  const keyC = keywords[2] || fallback[2];
+
+  return [
+    {
+      id: 1,
+      prompt: `Which concept is most central to ${subject} based on your notes?`,
+      options: [keyA, keyB, keyC, 'Revision cycle'],
+      answer: keyA
+    },
+    {
+      id: 2,
+      prompt: 'Which practice action best improves recall for this topic?',
+      options: ['Skip explanations', 'Solve mixed questions', 'Ignore weak areas', 'Avoid flashcards'],
+      answer: 'Solve mixed questions'
+    },
+    {
+      id: 3,
+      prompt: 'What is the best strategy before your next exam?',
+      options: ['Random rereading', 'Targeted revision + practice tests', 'Ignore notes', 'Only memorize definitions'],
+      answer: 'Targeted revision + practice tests'
+    }
+  ];
+}
+
+function App() {
+  const [notes, setNotes] = useState<StudyNote[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) {
+      return starterNotes;
+    }
+
+    try {
+      const parsed = JSON.parse(saved) as { notes?: StudyNote[]; subject?: string };
+      return parsed.notes?.length ? parsed.notes : starterNotes;
+    } catch {
+      return starterNotes;
+    }
+  });
+
+  const [selectedSubject, setSelectedSubject] = useState<string>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return 'DBMS';
+
+    try {
+      const parsed = JSON.parse(saved) as { notes?: StudyNote[]; subject?: string };
+      return parsed.subject || 'DBMS';
+    } catch {
+      return 'DBMS';
+    }
+  });
+
+  const [draftText, setDraftText] = useState('');
+  const [draftTitle, setDraftTitle] = useState('');
+  const [taskList, setTaskList] = useState<Task[]>(starterTasks);
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
+
+  const selectedNote = useMemo(
+    () => notes.find((note) => note.subject === selectedSubject) ?? notes[0] ?? starterNotes[0],
+    [notes, selectedSubject]
+  );
+
+  const quiz = useMemo(
+    () => createQuiz(selectedNote.content, selectedNote.subject),
+    [selectedNote]
+  );
+
+  const summary = useMemo(() => generateSummary(selectedNote.content), [selectedNote]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ notes, subject: selectedSubject })
+    );
+  }, [notes, selectedSubject]);
+
+  const addNote = () => {
+    const trimmedTitle = draftTitle.trim();
+    const trimmedText = draftText.trim();
+
+    if (!trimmedText) {
+      return;
+    }
+
+    const newNote: StudyNote = {
+      id: `note-${Date.now()}`,
+      title: trimmedTitle || `${selectedSubject} study note`,
+      subject: selectedSubject,
+      content: trimmedText,
+      createdAt: new Date().toISOString().slice(0, 10)
+    };
+
+    setNotes((prev) => [newNote, ...prev]);
+    setDraftText('');
+    setDraftTitle('');
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const text = await file.text();
+    setDraftText(text);
+    setDraftTitle(file.name.replace(/\.[^/.]+$/, '') || `${selectedSubject} uploaded notes`);
+    event.target.value = '';
+  };
+
+  const toggleTask = (taskId: number) => {
+    setTaskList((prev) =>
+      prev.map((task) =>
+        task.id === taskId ? { ...task, done: !task.done } : task
+      )
+    );
+  };
+
+  const progress = Math.min(100, Math.round((notes.length * 18 + selectedSubject.length * 4) / 2));
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="brand-wrap">
+          <div className="brand-mark">S</div>
+          <div>
+            <div className="brand-name">StudyMate AI</div>
+            <div className="brand-tag">Your learning command center</div>
+          </div>
+        </div>
+
+        <nav className="nav">
+          <a href="#workspace">Workspace</a>
+          <a href="#subjects">Subjects</a>
+          <a href="#practice">Practice</a>
+          <a href="#analytics">Analytics</a>
+        </nav>
+
+        <button className="primary-btn">Open workspace</button>
+      </header>
+
+      <main className="main-content">
+        <section className="hero section-card">
+          <div className="hero-copy">
+            <span className="eyebrow">Upload → Understand → Practice → Test → Analyze → Improve</span>
+            <h1>Build stronger exam readiness with AI-guided study plans.</h1>
+            <p>
+              Organize notes, generate topic summaries, track weak areas, and sharpen revision with smart practice.
+            </p>
+            <div className="cta-row">
+              <button className="primary-btn">Upload notes</button>
+              <button className="secondary-btn">View study roadmap</button>
+            </div>
+          </div>
+
+          <div className="hero-panel">
+            <div className="panel-header">
+              <span>Today’s focus</span>
+              <span className="pill success">On track</span>
+            </div>
+
+            <div className="focus-card">
+              <div className="focus-topline">
+                <span>{selectedSubject}</span>
+                <span>{progress}%</span>
+              </div>
+              <div className="progress-bar">
+                <span style={{ width: `${progress}%` }} />
+              </div>
+              <ul>
+                <li>Review summary and weak concepts</li>
+                <li>Complete 8-question practice set</li>
+                <li>Finish revision plan before 8 PM</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section className="stats-grid">
+          {[
+            { label: 'Study streak', value: '18 days' },
+            { label: 'Average retention', value: '93%' },
+            { label: 'Topics improved', value: '07' },
+            { label: 'Practice score', value: '89%' }
+          ].map((item) => (
+            <div className="stat-box section-card" key={item.label}>
+              <div className="stat-value">{item.value}</div>
+              <div className="stat-label">{item.label}</div>
+            </div>
+          ))}
+        </section>
+
+        <section className="workspace-grid" id="workspace">
+          <div className="section-card upload-panel">
+            <div className="section-title-row">
+              <div>
+                <span className="eyebrow">Workspace</span>
+                <h2>Upload notes</h2>
+              </div>
+            </div>
+
+            <div className="subject-pills" aria-label="Subject selector">
+              {subjectCatalog.map((subject) => (
+                <button
+                  key={subject.id}
+                  className={`subject-pill ${selectedSubject === subject.id ? 'active' : ''}`}
+                  onClick={() => setSelectedSubject(subject.id)}
+                >
+                  {subject.name}
+                </button>
+              ))}
+            </div>
+
+            <label className="upload-box">
+              <input type="file" accept=".txt,.md,.pdf" onChange={handleFileUpload} />
+              <div className="upload-copy">
+                <strong>Upload notes</strong>
+                <span>Text, Markdown, or PDF notes</span>
+              </div>
+            </label>
+
+            <div className="note-form">
+              <input
+                type="text"
+                placeholder="Note title"
+                value={draftTitle}
+                onChange={(event) => setDraftTitle(event.target.value)}
+              />
+              <textarea
+                placeholder="Paste a lecture, chapter summary, or concept notes…"
+                value={draftText}
+                onChange={(event) => setDraftText(event.target.value)}
+              />
+              <button className="primary-btn full-width" onClick={addNote}>Add to study library</button>
+            </div>
+          </div>
+
+          <div className="section-card summary-panel">
+            <div className="section-title-row">
+              <div>
+                <span className="eyebrow">AI summary</span>
+                <h2>{selectedNote.title}</h2>
+              </div>
+            </div>
+
+            <div className="summary-content">
+              {summary.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="mid-grid" id="subjects">
+          <div className="section-card subject-panel">
+            <div className="section-title-row">
+              <div>
+                <span className="eyebrow">Progress</span>
+                <h2>Subject tracker</h2>
+              </div>
+            </div>
+
+            <div className="subjects-list">
+              {subjectCatalog.map((subject) => (
+                <div key={subject.id} className="subject-row">
+                  <div className="subject-head">
+                    <span>{subject.name}</span>
+                    <strong>{subject.progress}%</strong>
+                  </div>
+                  <div className="progress-bar light">
+                    <span style={{ width: `${subject.progress}%`, background: subject.color }} />
+                  </div>
+                  <div className="subject-meta">Next: {subject.nextTopic}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="section-card todo-panel">
+            <div className="section-title-row">
+              <div>
+                <span className="eyebrow">Plan</span>
+                <h2>Today’s checklist</h2>
+              </div>
+            </div>
+
+            <div className="task-list">
+              {taskList.map((task) => (
+                <button key={task.id} className="task-item" onClick={() => toggleTask(task.id)}>
+                  <span className={`task-check ${task.done ? 'checked' : ''}`} aria-label="toggle task" />
+                  <div>
+                    <strong className={task.done ? 'done' : ''}>{task.title}</strong>
+                    <small>{task.due}</small>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="practice-grid" id="practice">
+          <div className="section-card quiz-panel">
+            <div className="section-title-row">
+              <div>
+                <span className="eyebrow">Practice</span>
+                <h2>Quiz mode</h2>
+              </div>
+            </div>
+
+            <div className="quiz-box">
+              {quiz.map((question) => (
+                <div key={question.id} className="question-card">
+                  <h3>{question.prompt}</h3>
+                  <div className="option-list">
+                    {question.options.map((option) => (
+                      <button
+                        key={option}
+                        className={`option ${selectedAnswers[question.id] === option ? 'selected' : ''}`}
+                        onClick={() =>
+                          setSelectedAnswers((prev) => ({
+                            ...prev,
+                            [question.id]: option
+                          }))
+                        }
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                  {selectedAnswers[question.id] && (
+                    <div className={`answer-feedback ${selectedAnswers[question.id] === question.answer ? 'correct' : 'wrong'}`}>
+                      {selectedAnswers[question.id] === question.answer ? 'Correct — good recall.' : `Best answer: ${question.answer}`}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="section-card analytics-panel" id="analytics">
+            <div className="section-title-row">
+              <div>
+                <span className="eyebrow">Analytics</span>
+                <h2>Performance</h2>
+              </div>
+            </div>
+
+            <div className="chart-bars" aria-label="Performance graph">
+              <span style={{ height: '30%' }} />
+              <span style={{ height: '45%' }} />
+              <span style={{ height: '38%' }} />
+              <span style={{ height: '56%' }} />
+              <span style={{ height: '70%' }} />
+              <span style={{ height: '82%' }} />
+              <span style={{ height: '91%' }} />
+            </div>
+
+            <div className="insight-list">
+              <div className="insight-item">
+                <strong>Strongest area</strong>
+                <span>DBMS fundamentals</span>
+              </div>
+              <div className="insight-item">
+                <strong>Focus next</strong>
+                <span>Operating systems scheduling</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+export default App;
